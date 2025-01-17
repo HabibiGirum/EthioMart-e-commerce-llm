@@ -1,6 +1,17 @@
 # week-5  
 ![Build Status](https://github.com/HabibiGirum/EthioMart-e-commerce-llm/actions/workflows/unittests.yml/badge.svg)
 
+# Project Overview
+EthioMart is envisioned as the primary hub for Telegram-based e-commerce activities in Ethiopia. With the growing popularity of Telegram for business transactions, the current decentralized structure of multiple independent e-commerce channels presents significant challenges. To address this, EthioMart aims to create a centralized platform that consolidates real-time data from multiple Telegram channels into one unified interface.
+Key to this initiative is the fine-tuning of a Language Model (LLM) for Amharic Named Entity Recognition (NER), which extracts essential business entities such as product names, prices, and locations from text, images, and documents shared in these channels. The extracted data is used to populate EthioMart's centralized database, ensuring a seamless and comprehensive experience for customers and vendors.
+
+# Key Objectives
+1. Real-time Data Extraction: Fetch data from multiple Ethiopian Telegram e-commerce channels in real time.
+2. Fine-tuned NER System: Extract critical entities such as:
+    - Product Names or Types
+    - Material or Ingredients
+    - Location Mentions
+    - Monetary Values or Prices
 
 
 ## Installation
