@@ -1,142 +1,86 @@
+import telethon
+from telethon.sync import TelegramClient
+import re
 import pandas as pd
-import matplotlib.pyplot as plt
-import seaborn as sns
-from scipy.stats import zscore
+from sklearn.model_selection import train_test_split
 
-class EDA:
-    def __init__(self, df):
-        """
-        Initialize the EDA class with the provided dataset (df).
-        """
-        self.df = df
+class EthioMartNER:
+    def __init__(self, api_id, api_hash, phone_number):
+        self.client = TelegramClient('ethio_mart', api_id, api_hash)
+        self.phone_number = phone_number
+
+    def connect_to_telegram(self):
+        """Connect to the Telegram client."""
+        self.client.connect()
+        if not self.client.is_user_authorized():
+            self.client.send_code_request(self.phone_number)
+            self.client.sign_in(self.phone_number, input('Enter the code: '))
+
+    def fetch_data(self, channels, output_file):
+        """Fetch messages from specified Telegram channels."""
+        data = []
         
-    def data_summary(self):
-        """
-        Perform a summary of the dataset including descriptive statistics and data structure.
-        """
-        print("Data Structure (Data Types):")
-        print(self.df.dtypes)
-        print("\nDescriptive Statistics:")
-        print(self.df.describe())
-        print(self.df.columns.tolist())
-        
-    def data_quality_assessment(self):
-        """
-        Check for missing values and any potential data quality issues.
-        """
-        missing_data = self.df.isnull().sum()
-        print("\nMissing Data:")
-        print(missing_data[missing_data > 0])
-        
-    def univariate_analysis(self):
-        """
-        Perform univariate analysis to visualize distributions of numerical and categorical columns.
-        """
-        numerical_columns = self.df.select_dtypes(include=['float64', 'int64']).columns
-        categorical_columns = self.df.select_dtypes(include=['object']).columns
-        
-        # Plot histograms for numerical columns
-        self.df[numerical_columns].hist(figsize=(15, 10), bins=20, color='skyblue', edgecolor='black')
-        plt.suptitle('Histograms of Numerical Columns')
-        plt.show()
-        
-        # Plot bar charts for categorical columns
-        for col in categorical_columns:
-            plt.figure(figsize=(10, 6))
-            sns.countplot(x=col, data=self.df, palette="Set2")
-            plt.title(f'Countplot of {col}')
-            plt.xticks(rotation=45)
-            plt.show()
-        
-    def bivariate_analysis(self):
-        """
-        Perform bivariate analysis and explore relationships between variables.
-        """
-        # Ensure datetime columns are converted to datetime type
-        for col in self.df.select_dtypes(include=['object']).columns:
+        for channel in channels:
             try:
-                self.df[col] = pd.to_datetime(self.df[col], errors='coerce')
-            except Exception:
-                pass  # Skip columns that cannot be converted to datetime
+                for message in self.client.iter_messages(channel):
+                    if message.text or message.media:
+                        data.append({
+                            'channel': channel,
+                            'message_id': message.id,
+                            'sender': message.sender_id,
+                            'timestamp': message.date,
+                            'content': message.text or '',
+                        })
+            except Exception as e:
+                print(f"Error fetching data from {channel}: {e}")
+
+        df = pd.DataFrame(data)
+        df.to_csv(output_file, index=False)
+        print(f"Data saved to {output_file}")
+
+    def preprocess_text(self, input_file, output_file):
+        """Preprocess and clean the text data."""
+        df = pd.read_csv(input_file)
         
-        # Select only numerical columns for correlation
-        numerical_columns = self.df.select_dtypes(include=['float64', 'int64']).columns
-        correlation_matrix = self.df[numerical_columns].corr()
-
-        # Plot correlation matrix
-        plt.figure(figsize=(10, 8))
-        sns.heatmap(correlation_matrix, annot=True, cmap='coolwarm', fmt='.2f')
-        plt.title('Correlation Matrix of Numerical Features')
-        plt.show()
-
-        # Scatter plot between TotalPremium and TotalClaims, grouped by PostalCode
-        plt.figure(figsize=(10, 6))
-        sns.scatterplot(x='TotalPremium', y='TotalClaims', hue='PostalCode', data=self.df, palette="viridis")
-        plt.title('TotalPremium vs TotalClaims by ZipCode')
-        plt.show()
-
-
-    def data_comparison(self):
-        """
-        Compare data based on geography and other categories.
-        """
-        # Drop rows with missing 'make' or 'TotalPremium'
-        self.df = self.df.dropna(subset=['make', 'TotalPremium'])
-
-        # Check if there are any 'make' categories with no data
-        make_counts = self.df['make'].value_counts()
-        valid_makes = make_counts[make_counts > 0].index
+        # Tokenization, normalization, and handling Amharic-specific linguistic features
+        df['cleaned_content'] = df['content'].apply(lambda x: self._clean_text(x))
         
-        # Filter out invalid 'make' categories
-        self.df = self.df[self.df['make'].isin(valid_makes)]
+        # Save preprocessed data
+        df.to_csv(output_file, index=False)
+        print(f"Preprocessed data saved to {output_file}")
 
-        # Verify that we have valid data for boxplot
-        print(f"Valid makes: {valid_makes}")
+    def _clean_text(self, text):
+        """Tokenize and clean text for Amharic-specific features."""
+        text = re.sub(r'[\n\r]+', ' ', text)
+        text = re.sub(r'[^ሀ-፿\s]', '', text)  # Keep Amharic characters
+        text = re.sub(r'\s+', ' ', text).strip()
+        return text
 
-        # Trend analysis: Compare TotalPremium by Vehicle Make (or any relevant category)
-        plt.figure(figsize=(12, 8))
-        sns.boxplot(x='make', y='TotalPremium', data=self.df)
-        plt.title('Distribution of TotalPremium by Vehicle Make')
-        plt.xticks(rotation=45)
-        plt.show()
+    def label_data_conll(self, input_file, output_file):
+        """Label a subset of the dataset in CoNLL format."""
+        df = pd.read_csv(input_file)
+        messages = df['cleaned_content'].sample(n=50, random_state=42).tolist()
 
+        with open(output_file, 'w', encoding='utf-8') as f:
+            for message in messages:
+                tokens = message.split()
+                for token in tokens:
+                    label = self._get_label(token)
+                    f.write(f"{token} {label}\n")
+                f.write("\n")
 
+        print(f"Labeled data saved in CoNLL format to {output_file}")
 
-    def outlier_detection(self):
-        """
-        Detect outliers using boxplots for numerical features.
-        """
-        numerical_columns = self.df.select_dtypes(include=['float64', 'int64']).columns
-        
-        for col in numerical_columns:
-            if col == 'TotalPremium' or col == 'TotalClaims':
-                
-                plt.figure(figsize=(10, 6))
-                sns.boxplot(x=self.df[col], color='lightblue')
-                plt.title(f'Boxplot for {col}')
-                plt.show()
+    def _get_label(self, token):
+        """Determine the label for a given token."""
+        if re.match(r'^\d+\s*ብር$', token):
+            return 'B-PRICE'
+        elif re.match(r'^\d+$', token):
+            return 'I-PRICE'
+        elif token in ['ቦሌ', 'አዲስ', 'ቤተሰብ']:
+            return 'B-LOC'
+        elif re.match(r'^[A-Za-z]+$', token):
+            return 'B-Product'
+        else:
+            return 'O'
 
-    def creative_visualizations(self):
-        """
-        Produce 3 creative visualizations capturing key insights.
-        """
-        # Visualization 1: Premium distribution by cover type
-        plt.figure(figsize=(12, 8))
-        sns.violinplot(x='CoverType', y='TotalPremium', data=self.df, inner="quart", palette="coolwarm")
-        plt.title('Distribution of TotalPremium by CoverType')
-        plt.show()
-
-        # Visualization 2: Claims frequency by VehicleType
-        plt.figure(figsize=(12, 8))
-        sns.countplot(x='VehicleType', data=self.df, palette="muted")
-        plt.title('Frequency of Claims by VehicleType')
-        plt.xticks(rotation=45)
-        plt.show()
-
-        # Visualization 3: Trends over time (e.g., TotalClaims over TransactionMonth)
-        plt.figure(figsize=(12, 8))
-        monthly_claims = self.df.groupby('TransactionMonth')['TotalClaims'].sum().reset_index()
-        sns.lineplot(data=monthly_claims, x='TransactionMonth', y='TotalClaims', marker='o')
-        plt.title('TotalClaims Trends Over TransactionMonth')
-        plt.xticks(rotation=45)
-        plt.show()
